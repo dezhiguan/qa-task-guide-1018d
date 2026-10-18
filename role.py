@@ -30,18 +30,30 @@ _WRITE_PATTERNS = [
 ]
 
 
-def _has_write_request(text: str) -> bool:
-    for p in _WRITE_PATTERNS:
-        if re.search(p, text):
+def _has_unnegated_write_request(text: str) -> bool:
+    """Clause-level check: block only when a write clause lacks local negation."""
+    clauses = re.split(r"[，,、；;。！？\n]", text)
+    for clause in clauses:
+        clause = clause.strip()
+        if not clause:
+            continue
+        has_write = any(re.search(p, clause) for p in _WRITE_PATTERNS)
+        is_neg = any(re.search(p, clause) for p in _NEGATION_PATTERNS)
+        if has_write and not is_neg:
             return True
     return False
 
 
-def _is_negated(text: str) -> bool:
-    for p in _NEGATION_PATTERNS:
-        if re.search(p, text):
-            return True
-    return False
+def _is_injection(text: str) -> bool:
+    """Detect prompt injection / authority-override attempts."""
+    patterns = [
+        r"(?:新的系统指令|作为.*指令|以下.*规则|ignore.*rule|override|忽略.*规则)",
+        r"(?:执行任何|可以.*所有|所有写操作|任何写操作)",
+        r"(?:必须.*(?:输出|返回).*(?:PASS|通过))",
+        r"(?:跳过.*(?:工具|检查|核验|验证)|skip.*(?:tool|check|read))",
+        r"(?:fabricat|编造|虚构|伪造)",
+    ]
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
 def _filter_readonly_tools(catalog: list) -> list:
@@ -89,8 +101,10 @@ async def execute(data: dict, ctx) -> dict:
 
     job_id = unique_ids[0]
 
-    if _has_write_request(text) and not _is_negated(text):
+    if _has_unnegated_write_request(text):
         return _blocked("检测到肯定性写操作/发布/合并请求，本岗位仅提供信息查询。")
+    if _is_injection(text):
+        return _blocked("检测到提示注入或权限覆盖尝试，本岗位不接受外部指令覆盖。")
 
     # 调用 devflow.job.read
     try:
