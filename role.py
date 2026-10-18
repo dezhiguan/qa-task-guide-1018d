@@ -115,6 +115,12 @@ async def execute(data: dict, ctx) -> dict:
     if not isinstance(catalog_result, list):
         return _blocked("工具目录返回格式无效。")
 
+    for item in catalog_result:
+        if not isinstance(item, dict):
+            return _blocked("工具目录包含无效条目（非字典类型）。")
+        if not item.get("name") or not item.get("access") or not item.get("risk"):
+            return _blocked("工具目录条目缺少name/access/risk字段。")
+
     readonly_tools = _filter_readonly_tools(catalog_result)
 
     # 组装证据
