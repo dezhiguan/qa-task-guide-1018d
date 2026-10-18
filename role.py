@@ -44,6 +44,17 @@ def _has_unnegated_write_request(text: str) -> bool:
     return False
 
 
+def _prohibits_required_tools(text: str) -> bool:
+    """Detect explicit prohibition of calling required read tools."""
+    patterns = [
+        r"(?:不要|禁止|不得|无需|不能|不许|别|勿|不可)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:devflow\.\w+\.\w+|工具|这些工具|上述工具|读取工具|全部工具|所有工具)",
+        r"(?:跳过|不调用|不使用|不执行|不访问)\s*(?:devflow\.\w+\.\w+|工具|读取|所有|全部)",
+        r"(?:do\s*not|don't|without|never)\s+(?:call|invoke|use|execute|run|access)\w*\s+(?:devflow\.\w+\.\w+|the\s+tool|all\s+tools|reading\s+tools|these\s+tools)",
+        r"skip\s+(?:devflow\.\w+\.\w+|all\s+(?:read|tools)|the\s+(?:read|tool)|reading)",
+    ]
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
 def _is_injection(text: str) -> bool:
     """Detect prompt injection / authority-override attempts."""
     patterns = [
@@ -105,6 +116,8 @@ async def execute(data: dict, ctx) -> dict:
         return _blocked("检测到肯定性写操作/发布/合并请求，本岗位仅提供信息查询。")
     if _is_injection(text):
         return _blocked("检测到提示注入或权限覆盖尝试，本岗位不接受外部指令覆盖。")
+    if _prohibits_required_tools(text):
+        return _blocked("检测到明确禁止调用必需读取工具的指令，无法完成查询。")
 
     # 调用 devflow.job.read
     try:

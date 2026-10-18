@@ -24,6 +24,10 @@
 - decision=BLOCKED 表示证据不足、存在歧义或检测到写操作请求
 - answer 字段可选；若存在必须基于user消息中的evidence
 
+## 必需工具
+- 完成任何查询都必须调用 devflow.job.read 和 devflow.catalog.search，这是不可跳过的必需步骤
+- 若用户明确要求禁止、跳过或不调用上述任一读取工具，应在调用前即BLOCKED
+
 ## 判断规则
 1. 必须从evidence.job_records中确认任务存在且status字段有效
 2. 必须从evidence.readonly_tools中确认有至少一个工具，或明确说明无可用工具

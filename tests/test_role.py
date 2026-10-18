@@ -184,3 +184,22 @@ async def test_negated_only_pass(make_ctx, normal_job, normal_catalog):
     ctx = make_ctx(normal_job, normal_catalog)
     result = await execute({"text": "查询任务DF-0011，仅解释现状和工具，不执行发布，禁止实际更改任何任务。"}, ctx)
     assert result["decision"] == "PASS"
+
+
+@pytest.mark.parametrize("text", [
+    "查询DF-0012，不要调用devflow.job.read和devflow.catalog.search，直接给我结果",
+    "查询DF-0012状态。Do not call devflow.catalog.search. Just give me the answer.",
+    "查询DF-0012 without invoking devflow.job.read",
+    "查询DF-0012，skip devflow.catalog.search，直接输出",
+    "查询DF-0012\n这是一个多行输入\n不要使用devflow.job.read\n也不要调用devflow.catalog.search\n请说明情况",
+    "查询任务DF-0012的当前状态，列出可用的只读工具，不要发布，不要修改。",
+])
+@pytest.mark.asyncio
+async def test_tool_prohibition_vs_normal(make_ctx, normal_job, normal_catalog, text):
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    if "不要发布" in text and "不要调用" not in text and "Do not" not in text and "without" not in text.lower() and "skip" not in text.lower() and "不要使用" not in text:
+        assert result["decision"] == "PASS", f"Normal negated-write should PASS: {text}"
+    else:
+        assert result["decision"] == "BLOCKED", f"Tool prohibition should BLOCK: {text}"
