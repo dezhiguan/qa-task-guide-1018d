@@ -27,18 +27,26 @@ _WRITE_PATTERNS = [
     r"执行\s*devflow\.(?:job\.update|pr\.merge|deploy)",
     r"(?:合并|发布|上线)\s*(?:关联的|到|至|将)",
     r"(?:然后|接着|之后)\s*(?:执行|修改|合并|发布)",
+    r"(?:把|将|对)\s*(?:状态|status)\s*(?:修改|更改|改|设为|设置为|改为)",
+    r"(?:修改|更改|设置|改)\s*(?:状态|status)\s*(?:为|成|到)",
+    r"(?:update|change|modify|set)\s+(?:the\s+)?(?:status|state)",
+    r"(?:deploy|merge|publish|release)\s+(?:to|into|the|it|this|task|job)",
+    r"(?:把|将).{0,20}(?:合并|发布|上线|部署)",
 ]
 
 
 def _has_unnegated_write_request(text: str) -> bool:
-    """Clause-level check: block only when a write clause lacks local negation."""
-    clauses = re.split(r"[，,、；;。！？\n]", text)
-    for clause in clauses:
-        clause = clause.strip()
-        if not clause:
+    """Segment-level check: negation only covers its own segment, not cross-segment."""
+    segments = re.split(
+        r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时)",
+        text, flags=re.IGNORECASE,
+    )
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
             continue
-        has_write = any(re.search(p, clause) for p in _WRITE_PATTERNS)
-        is_neg = any(re.search(p, clause) for p in _NEGATION_PATTERNS)
+        has_write = any(re.search(p, seg) for p in _WRITE_PATTERNS)
+        is_neg = any(re.search(p, seg) for p in _NEGATION_PATTERNS)
         if has_write and not is_neg:
             return True
     return False
@@ -100,8 +108,8 @@ def _build_answer(job_records: list, readonly_tools: list) -> str:
 
 async def execute(data: dict, ctx) -> dict:
     text = data.get("text", "")
-    if not text or not text.strip():
-        return _blocked("输入为空白，无法提取任务编号。")
+    if not isinstance(text, str) or not text.strip():
+        return _blocked("输入无效或为空白，无法提取任务编号。")
 
     job_ids = _extract_job_ids(text)
     unique_ids = list(dict.fromkeys(job_ids))
@@ -129,10 +137,16 @@ async def execute(data: dict, ctx) -> dict:
     if not isinstance(job_result, list) or len(job_result) == 0:
         return _blocked(f"任务{job_id}无记录或查询返回空列表。")
 
-    # 校验每条记录是dict且有status
+    # 校验每条记录是dict且status为非空合法字符串
+    _VALID_STATUSES = {"RUN", "WAIT", "HUMAN", "QUEUED", "DONE", "FAIL", "CANCEL"}
     for rec in job_result:
         if not isinstance(rec, dict) or "status" not in rec:
             return _blocked(f"任务{job_id}返回的记录格式无效。")
+        status = rec["status"]
+        if not isinstance(status, str) or not status.strip():
+            return _blocked(f"任务{job_id}的status字段无效（非字符串或为空）。")
+        if status.strip().upper() not in _VALID_STATUSES:
+            return _blocked(f"任务{job_id}的status值'{status}'不在合法集合中。")
 
     # 调用 devflow.catalog.search
     try:

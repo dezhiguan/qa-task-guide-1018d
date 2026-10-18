@@ -205,3 +205,107 @@ async def test_tool_prohibition_vs_normal(make_ctx, normal_job, normal_catalog, 
         assert result["decision"] == "PASS", f"Normal negated-write should PASS: {text}"
     else:
         assert result["decision"] == "BLOCKED", f"Tool prohibition should BLOCK: {text}"
+
+
+@pytest.mark.asyncio
+async def test_affirmative_write_chinese_blocked(make_ctx, normal_job, normal_catalog):
+    """Issue 1: '把状态修改为DONE' must BLOCK even with model PASS."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": "查询DF-0012，把状态修改为DONE。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_affirmative_write_english_blocked(make_ctx, normal_job, normal_catalog):
+    """Issue 1: English 'update its status to DONE' must BLOCK."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": "Read DF-0012 and update its status to DONE."}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_no_punctuation_negation_cross_blocked(make_ctx, normal_job, normal_catalog):
+    """Issue 2: '仅查询...然后执行' without comma still BLOCKED."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": "仅查询DF-0012然后执行devflow.job.update将状态改为DONE"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_invalid_status_none_blocked(make_ctx, normal_catalog):
+    """Issue 3: status=None must BLOCK before model call."""
+    from role import execute
+    ctx = make_ctx([{"id": "DF-0012", "status": None}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_invalid_status_empty_blocked(make_ctx, normal_catalog):
+    """Issue 3: status='' must BLOCK."""
+    from role import execute
+    ctx = make_ctx([{"id": "DF-0012", "status": ""}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_invalid_status_bogus_blocked(make_ctx, normal_catalog):
+    """Issue 3: status='BOGUS' not in allowed set must BLOCK."""
+    from role import execute
+    ctx = make_ctx([{"id": "DF-0012", "status": "BOGUS"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_invalid_status_boolean_blocked(make_ctx, normal_catalog):
+    """Issue 3: status=True (bool) must BLOCK."""
+    from role import execute
+    ctx = make_ctx([{"id": "DF-0012", "status": True}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_non_string_input_blocked():
+    """Issue 4: non-string text must return BLOCKED, not raise."""
+    from role import execute
+    ctx = MagicMock()
+    ctx.tools.call = AsyncMock(side_effect=[[{"id":"DF-0012","status":"RUN"}], [{"name":"x","access":"READ","risk":"LOW","description":""}]])
+    ctx.prompt = AsyncMock(return_value=MagicMock(compile=MagicMock(return_value="sys")))
+    ctx.llm.chat = AsyncMock(return_value='{"decision":"PASS"}')
+    for bad in [1, True, [], {}, None]:
+        result = await execute({"text": bad}, ctx)
+        assert result["decision"] == "BLOCKED", f"text={bad!r} should BLOCK"
+
+
+@pytest.mark.parametrize("status", ["RUN", "WAIT", "HUMAN", "QUEUED", "DONE", "FAIL", "CANCEL"])
+@pytest.mark.asyncio
+async def test_all_valid_statuses_pass(make_ctx, normal_catalog, status):
+    """Issue 3: all 7 valid statuses produce PASS (known records)."""
+    from role import execute
+    ctx = make_ctx([{"id": "DF-0012", "status": status}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的真实进度，只提供信息。"}, ctx)
+    assert result["decision"] == "PASS"
+
+
+@pytest.mark.asyncio
+async def test_english_deploy_blocked(make_ctx, normal_job, normal_catalog):
+    """Issue 1: English 'deploy to production' must BLOCK."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": "Read DF-0012 status and deploy to production."}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_english_merge_blocked(make_ctx, normal_job, normal_catalog):
+    """Issue 1: English 'merge the PR' must BLOCK."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": "Check DF-0012 and merge the PR now."}, ctx)
+    assert result["decision"] == "BLOCKED"
