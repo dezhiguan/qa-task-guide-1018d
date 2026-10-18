@@ -608,6 +608,26 @@ async def test_fix_round20_local_negation_anchor(make_ctx, normal_catalog, text,
     assert ctx.tools.call.call_count == tool_calls, f"Expected {tool_calls} calls for: {text}"
 
 
+@pytest.mark.parametrize("text,expected,tool_calls", [
+    ("查询DF-0012，不必更新任务状态", "PASS", 2),
+    ("查询DF-0012，不用修改状态", "PASS", 2),
+    ("查询DF-0012，不要调用任何工具", "BLOCKED", 0),
+    ("Read DF-0012; do not use any tools", "BLOCKED", 0),
+    ("查询DF-0012abc的状态", "BLOCKED", 0),
+    ("查询DF-0012-3的状态", "BLOCKED", 0),
+    ("查询DF-0012的当前状态", "PASS", 2),
+])
+@pytest.mark.asyncio
+async def test_fix_round21_boundary_cases(make_ctx, normal_catalog, text, expected, tool_calls):
+    from role import execute
+    ids = re.findall(r"DF-\d+(?![a-zA-Z0-9]|\-\d)", text)
+    job = [{"id": ids[0].upper() if ids else "DF-0012", "status": "RUN", "title": "边界"}]
+    ctx = make_ctx(job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == expected, f"Expected {expected} for: {text}, got {result['decision']}"
+    assert ctx.tools.call.call_count == tool_calls, f"Expected {tool_calls} calls for: {text}"
+
+
 # === Fix round 19: local negation per action and broad-pattern local negation ===
 
 @pytest.mark.parametrize("text,expected", [

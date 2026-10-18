@@ -4,7 +4,7 @@ from typing import Any
 
 
 def _extract_job_ids(text: str) -> list:
-    return [m.upper() for m in re.findall(r"DF-\d+", text, re.IGNORECASE)]
+    return [m.upper() for m in re.findall(r"DF-\d+(?![a-zA-Z0-9]|\-\d)", text, re.IGNORECASE)]
 
 
 def _blocked(reason: str) -> dict:
@@ -66,7 +66,7 @@ def _split_into_action_segments(text: str) -> list:
 # Allows optional adverbs/modifiers between negation and verb, but forbids crossing
 # another action verb or a new request marker like 请.
 _LOCAL_NEG_RE = re.compile(
-    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|不允许|not|never|without|don\'t)"
+    r"(?:不必|不用|不要|不需要|不可|不|禁止|不得|无需|不代表|不能|勿|别|不允许|not|never|without|don\'t)"
     r"[\s]*"
     r"(?:实际|自动|执行|主动|擅自|自行|随意|任意|直接|立马|马上|立刻|immediately|directly)?"
     r"[\s]*$",
@@ -118,12 +118,12 @@ def _has_unnegated_write_request(text: str) -> bool:
 
 def _prohibits_required_tools(text: str) -> bool:
     _REQUIRED_TOOLS = r"(?:devflow\.job\.read|devflow\.catalog\.search)"
-    _GENERIC_READ = r"(?:工具|这些工具|上述工具|读取工具|全部工具|所有工具|the\s+tools?|all\s+tools?|these\s+tools?|reading\s+tools?)"
+    _GENERIC_READ = r"(?:工具|任何工具|这些工具|上述工具|读取工具|全部工具|所有工具|the\s+tools?|all\s+tools?|any\s+tools?|these\s+tools?|reading\s+tools?)"
     _EN_DET = r"(?:(?:the|either|any|both|all|neither|these|those|such|one|each|every)\s+(?:of\s+(?:the\s+)?)?)?"
     patterns = [
-        rf"(?:不要|禁止|不得|无需|不能|不许|别|勿|不可|不允许)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"(?:不必|不用|不要|不需要|禁止|不得|无需|不能|不许|别|勿|不可|不允许)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
         rf"(?:跳过|不调用|不使用|不执行|不访问)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ}|工具|读取|所有|全部)",
-        rf"(?:do\s*not|don\'t|without|never)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+{_EN_DET}(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"(?:do\s*not|don\'t|without|never|not)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+{_EN_DET}(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
         rf"skip\s+(?:{_REQUIRED_TOOLS}|all\s+(?:read|tools)|the\s+(?:read|tool))",
     ]
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
@@ -140,7 +140,7 @@ _INJECTION_BASE_PATTERNS = [
     r"(?:force|must)\s*(?:output|return|print)\s*(?:PASS|pass)\b",
 ]
 
-_INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不|禁止|不得|不要|无需|不能|不需要|不可|勿|别|不允许)\s*(?:[，,、；;]\s*)?$"
+_INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不必|不用|不要|不需要|不可|不|禁止|不得|无需|不能|勿|别|不允许)\s*(?:[，,、；;]\s*)?$"
 
 
 def _is_injection(text: str) -> bool:
@@ -154,7 +154,7 @@ def _is_injection(text: str) -> bool:
 
 _BROAD_PATTERNS = [r"(?:执行任何|可以.*所有|所有写操作|任何写操作)"]
 # Negation words that directly qualify a broad expression must be within 6 chars before it
-_BROAD_NEG_PREFIX = r"(?:禁止|不得|不要|不允许|不可|不能|无需|别|勿|不)(?:[，,、；;\s]*)?(?:执行)?(?:[，,、；;\s]*)?$"
+_BROAD_NEG_PREFIX = r"(?:不必|不用|不要|不需要|禁止|不得|不允许|不可|不能|无需|别|勿|不)(?:[，,、；;\s]*)?(?:执行)?(?:[，,、；;\s]*)?$"
 
 
 def _has_unnegated_broad(text: str) -> bool:
