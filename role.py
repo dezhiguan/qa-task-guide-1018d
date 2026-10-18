@@ -4,7 +4,7 @@ from typing import Any
 
 
 def _extract_job_ids(text: str) -> list:
-    return [m.upper() for m in re.findall(r"DF-\d+(?![a-zA-Z0-9_]|\-\d)", text, re.IGNORECASE)]
+    return [m.upper() for m in re.findall(r"(?<![a-zA-Z])DF-\d+(?![a-zA-Z0-9_]|\-\d)", text, re.IGNORECASE)]
 
 
 def _blocked(reason: str) -> dict:
@@ -21,6 +21,7 @@ _NEGATION_PREFIXES = re.compile(
 )
 
 _WRITE_PATTERNS = [
+    r"(?:update|change|modify|set|merge|deploy|publish|release|cancel|delete|remove|close|approve|abort|terminate)\s+DF-\d+",
     r"(?:跳过核验|跳过检查).{0,10}(?:直接|然后|再)?\s*(?:修改|执行|合并|发布|上线)",
     r"(?:请|直接|自动)\s*(?:执行|修改|合并|发布|上线|更新|取消)",
     r"执行\s*devflow\.(?:job\.update|pr\.merge|deploy|job\.cancel)",
@@ -133,7 +134,7 @@ _INJECTION_BASE_PATTERNS = [
     r"(?:输出|返回|打印|显示|给出)\s*(?:PASS|pass|通过)\b",
 ]
 
-_INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不必|不用|不要|不需要|不可|不|禁止|不得|无需|不能|勿|别|不允许)\s*(?:[，,、；;]\s*)?$"
+_INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不必|不用|不要|不需要|不可|不|禁止|不得|无需|不能|勿|别|不允许)(?:\s+(?:实际|自动|执行|主动|擅自|自行|随意|任意|直接|立马|马上|立刻|immediately|directly|ever))*\s*(?:[，,、；;]\s*)?$"
 
 
 def _is_injection(text: str) -> bool:
