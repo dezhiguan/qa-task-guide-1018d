@@ -16,8 +16,8 @@ def _pass_out(answer: str, ev: list, steps: list) -> dict:
 
 
 _NEGATION_PATTERNS = [
-    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别)[^，,。；;！!\n]{0,8}(?:执行|更改|合并|发布|修改|上线|改|设为|改为|设置为)",
-    r"(?:do\s*not|don't|doesn't|without|never|no)\s+(?:change|modify|update|set|merge|deploy|publish|release|do)\b",
+    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别)[^，,。；;！!\n]{0,8}(?:执行|更改|合并|发布|修改|上线|改|设为|改为|设置为|部署|删除)",
+    r"(?:do\s*not|don't|doesn't|without|never|no)\s+(?:change|modify|update|set|merge|deploy|publish|release|delete|remove|create|do)\b",
 ]
 
 _WRITE_PATTERNS = [
@@ -33,6 +33,8 @@ _WRITE_PATTERNS = [
     r"(?:update|change|modify|set|merge|deploy|publish|release)\s+(?:to|into)\s+(?:production|prod|staging)",
     r"(?:deploy|merge|publish|release)\s+(?:to|into|the|it|this|task|job)",
     r"(?:把|将).{0,20}(?:合并|发布|上线|部署)",
+    r"(?:部署|删除|创建)\s*(?:到|至|进)?(?:生产|线上|正式|测试环境)?",
+    r"(?:delete|remove|create)\s+(?:the\s+)?(?:task|job|ticket|record|item|entry|PR|pr)\b",
 ]
 
 
@@ -71,6 +73,10 @@ _INJECTION_BASE_PATTERNS = [
     r"(?<![不禁要别勿得能可许])(?:fabricat|编造|虚构|伪造)(?:\s+(?:a|an|the|their|this|that)?\s*(?:successful\s+)?(?:task\s+)?(?:record|status|result|数据|记录|结果))",
     r"(?:必须.*(?:输出|返回).*(?:PASS|通过))",
     r"(?:跳过.*(?:工具|检查|核验|验证)|skip.*(?:tool|check|read))",
+    r"(?<![不禁要别勿得能可许])(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|above|earlier|the)?\s*(?:instructions?|rules?|prompts?|context|system)",
+    r"(?<![不禁要别勿得能可许])(?:忽略|无视|覆盖)\s*(?:所有|全部)?\s*(?:之前|上述|先前|以上|先前)?\s*(?:指令|指示|说明|提示|规则|上下文|系统)",
+    r"(?:强制|必须|立即|立刻|马上)\s*(?:输出|返回|显示|打印|给出)\s*(?:PASS|通过)",
+    r"(?:force|must)\s*(?:output|return|print)\s*(?:PASS|pass)\b",
 ]
 
 _INJECTION_BROAD_PATTERNS = [r"(?:执行任何|可以.*所有|所有写操作|任何写操作)"]
@@ -218,14 +224,21 @@ async def execute(data: dict, ctx) -> dict:
     ]
     evidence_sources = ["devflow.job.read", "devflow.catalog.search"]
 
-    prompt_obj = await ctx.prompt("role")
-    system_msg = prompt_obj.compile()
+    try:
+        prompt_obj = await ctx.prompt("role")
+        system_msg = prompt_obj.compile()
+    except Exception:
+        return _blocked("提示词加载或编译失败。")
+
     user_msg = json.dumps({"input": text, "evidence": evidence}, ensure_ascii=False)
 
-    model_output = await ctx.llm.chat(
-        [{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
-        prompt=prompt_obj,
-    )
+    try:
+        model_output = await ctx.llm.chat(
+            [{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
+            prompt=prompt_obj,
+        )
+    except Exception:
+        return _blocked("模型推理服务不可用。")
 
     try:
         parsed = json.loads(model_output)
