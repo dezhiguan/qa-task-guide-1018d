@@ -324,6 +324,8 @@ async def test_english_merge_blocked(make_ctx, normal_job, normal_catalog):
     "查询DF-0012 without modifying status.",
     "任务DF-0011，禁止实际更改任何任务。",
     "我只需要DF-0006的真实状态及工具列表，不需要任务成功。",
+    "仅查询DF-0012，列出可用工具。",
+    "只查询DF-0010的进度说明。",
 ])
 @pytest.mark.asyncio
 async def test_negated_safety_statements_pass(make_ctx, normal_job, normal_catalog, text):
@@ -348,6 +350,20 @@ async def test_negated_safety_statements_pass(make_ctx, normal_job, normal_catal
 @pytest.mark.asyncio
 async def test_affirmative_write_after_negation_blocked(make_ctx, normal_job, normal_catalog, text):
     """Fix 9: affirmative write in a separate segment (but/and/但) must BLOCK."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == "BLOCKED", f"Should BLOCK: {text}"
+
+
+@pytest.mark.parametrize("text", [
+    "仅查询DF-0012并执行devflow.job.update将状态改为DONE",
+    "只查询DF-0012并修改状态为DONE",
+    "仅查询DF-0012并合并PR",
+])
+@pytest.mark.asyncio
+async def test_scope_prefix_does_not_exempt_write(make_ctx, normal_job, normal_catalog, text):
+    """Scope declarations (仅/只查询) must not exempt affirmative write in same or adjacent segment."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": text}, ctx)

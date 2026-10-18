@@ -17,8 +17,6 @@ def _pass_out(answer: str, ev: list, steps: list) -> dict:
 
 _NEGATION_PATTERNS = [
     r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别)[^，,。；;！!\n]{0,8}(?:执行|更改|合并|发布|修改|上线|改|设为|改为|设置为)",
-    r"(?:仅|只)\s*(?:查询|解释|说明|提供|读取|了解|需要|需要|只需)",
-    r"(?:仅提供信息|Advice only|only read|read-only)",
     r"(?:do\s*not|don't|doesn't|without|never|no)\s+(?:change|modify|update|set|merge|deploy|publish|release|do)\b",
 ]
 
