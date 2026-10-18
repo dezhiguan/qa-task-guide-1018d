@@ -4,7 +4,7 @@ from typing import Any
 
 
 def _extract_job_ids(text: str) -> list:
-    return [m.upper() for m in re.findall(r"DF-\d+(?![a-zA-Z0-9]|\-\d)", text, re.IGNORECASE)]
+    return [m.upper() for m in re.findall(r"DF-\d+(?![a-zA-Z0-9_]|\-\d)", text, re.IGNORECASE)]
 
 
 def _blocked(reason: str) -> dict:
@@ -38,6 +38,9 @@ _WRITE_PATTERNS = [
     r"(?:部署|删除|创建|取消)\s*(?:任务|这条|记录)(?!\s*(?:时间|进度))",
     r"(?:delete|remove|create|cancel)\s+(?:the\s+)?(?:task|job|ticket|record|item|entry|PR|pr)\b",
     r"^(?:合并|发布|上线|部署|删除|修改|更新|取消)(?!\s*(?:进度|时间|记录|日志|状态|计划|列表|说明|报告|详情|信息|文档))",
+    r"(?:approve|close)\s+(?:the\s+|this\s+|that\s+|its\s+|their\s+)?(?:PR|pr|pull.?request|task|job|ticket|record)",
+    r"(?:批准|关闭)\s*(?:任务|PR|pr|记录|job|ticket)",
+    r"(?:把|将)\s*(?:任务|PR|pr|记录|job|ticket)\s*(?:关闭|批准|approve|close)",
 ]
 
 # Verb tokens used for local negation proximity check
@@ -68,7 +71,7 @@ def _split_into_action_segments(text: str) -> list:
 _LOCAL_NEG_RE = re.compile(
     r"(?:不必|不用|不要|不需要|不可|不|禁止|不得|无需|不代表|不能|勿|别|不允许|not|never|without|don\'t)"
     r"[\s]*"
-    r"(?:实际|自动|执行|主动|擅自|自行|随意|任意|直接|立马|马上|立刻|immediately|directly)?"
+    r"(?:实际|自动|执行|主动|擅自|自行|随意|任意|直接|立马|马上|立刻|immediately|directly|ever)?"
     r"[\s]*$",
     re.IGNORECASE,
 )
@@ -121,9 +124,9 @@ def _prohibits_required_tools(text: str) -> bool:
     _GENERIC_READ = r"(?:工具|任何工具|这些工具|上述工具|读取工具|全部工具|所有工具|the\s+tools?|all\s+tools?|any\s+tools?|these\s+tools?|reading\s+tools?)"
     _EN_DET = r"(?:(?:the|either|any|both|all|neither|these|those|such|one|each|every)\s+(?:of\s+(?:the\s+)?)?)?"
     patterns = [
-        rf"(?:不必|不用|不要|不需要|禁止|不得|无需|不能|不许|别|勿|不可|不允许)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
-        rf"(?:跳过|不调用|不使用|不执行|不访问)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ}|工具|读取|所有|全部)",
-        rf"(?:do\s*not|don\'t|without|never|not)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+{_EN_DET}(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"(?:不必|不用|不要|不需要|禁止|不得|无需|不能|不许|别|勿|不可|不允许|避免)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"(?:跳过|不调用|不使用|不执行|不访问|避免)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ}|工具|读取|所有|全部)",
+        rf"(?:do\s*not|don\'t|without|never|not|avoid(?:s|ing)?)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+{_EN_DET}(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
         rf"skip\s+(?:{_REQUIRED_TOOLS}|all\s+(?:read|tools)|the\s+(?:read|tool))",
     ]
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
@@ -138,6 +141,8 @@ _INJECTION_BASE_PATTERNS = [
     r"(?:跳过.*(?:工具|检查|核验|验证)|skip.*(?:tool|check|read))",
     r"(?:强制|必须|立即|立刻|马上)\s*(?:输出|返回|显示|打印|给出)\s*(?:PASS|通过)",
     r"(?:force|must)\s*(?:output|return|print)\s*(?:PASS|pass)\b",
+    r"(?:output|return|print)\s*(?:PASS|pass)\b",
+    r"(?:输出|返回|打印|显示|给出)\s*(?:PASS|pass|通过)\b",
 ]
 
 _INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不必|不用|不要|不需要|不可|不|禁止|不得|无需|不能|勿|别|不允许)\s*(?:[，,、；;]\s*)?$"
