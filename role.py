@@ -15,8 +15,10 @@ def _pass_out(answer: str, ev: list, steps: list) -> dict:
     return {"decision": "PASS", "answer": answer, "evidence_sources": ev, "steps": steps}
 
 
+# (kept for potential reuse; no longer used by _is_locally_negated)
 _NEGATION_PREFIXES = re.compile(
-    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|不允许|not|never|without|don't)"
+    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|不允许|not|never|without|don\'t)",
+    re.IGNORECASE,
 )
 
 _WRITE_PATTERNS = [
@@ -60,10 +62,39 @@ def _split_into_action_segments(text: str) -> list:
     return result
 
 
+# Anchored local-negation pattern: must sit at the END of the preceding text.
+# Allows optional adverbs/modifiers between negation and verb, but forbids crossing
+# another action verb or a new request marker like 请.
+_LOCAL_NEG_RE = re.compile(
+    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|不允许|not|never|without|don\'t)"
+    r"[\s]*"
+    r"(?:实际|自动|执行|主动|擅自|自行|随意|任意|直接|立马|马上|立刻|immediately|directly)?"
+    r"[\s]*$",
+    re.IGNORECASE,
+)
+# Words that indicate a new clause/action between negation and verb → negation doesn't apply
+_LOCAL_NEG_BLOCKERS = re.compile(
+    r"(?:请|然后|接着|之后|并且|而且|同时|but|and)",
+    re.IGNORECASE,
+)
+_VERB_IN_BLOCKER_RE = re.compile(_VERB_TOKENS, re.IGNORECASE)
+
+
 def _is_locally_negated(seg: str, verb_start: int) -> bool:
-    """Check if a verb at position verb_start is preceded by a negation within 6 chars."""
-    window = seg[max(0, verb_start - 6):verb_start]
-    return bool(_NEGATION_PREFIXES.search(window))
+    """Check if a verb at verb_start is immediately preceded by a complete negation phrase
+    that does not cross another action verb or a new-request marker."""
+    before = seg[:verb_start]
+    if not before:
+        return False
+    # Anchor: negation must be at the very end of 'before'
+    m = _LOCAL_NEG_RE.search(before)
+    if not m:
+        return False
+    # Between the negation match start and verb_start, ensure no blocking words appear
+    gap = before[m.start():]
+    if _LOCAL_NEG_BLOCKERS.search(gap):
+        return False
+    return True
 
 
 def _has_unnegated_write_request(text: str) -> bool:

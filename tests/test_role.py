@@ -590,6 +590,24 @@ async def test_prohibits_required_tools_articles(make_ctx, normal_catalog, text,
     assert ctx.tools.call.call_count == tool_calls, f"Expected {tool_calls} tool calls for: {text}"
 
 
+@pytest.mark.parametrize("text,expected,tool_calls", [
+    # Negation of one action must NOT exempt a different affirmative action
+    ("查询DF-0012，不改状态请发布到生产", "BLOCKED", 0),
+    # English 'do not cancel' must PASS — negation is immediately before cancel
+    ("Read DF-0012; do not cancel the task.", "PASS", 2),
+    ("read df-0012; do not cancel the task.", "PASS", 2),
+])
+@pytest.mark.asyncio
+async def test_fix_round20_local_negation_anchor(make_ctx, normal_catalog, text, expected, tool_calls):
+    from role import execute
+    ids = re.findall(r"DF-\d+", text)
+    job = [{"id": ids[0] if ids else "DF-0012", "status": "RUN", "title": "锚点修复"}]
+    ctx = make_ctx(job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == expected, f"Expected {expected} for: {text}, got {result['decision']}"
+    assert ctx.tools.call.call_count == tool_calls, f"Expected {tool_calls} calls for: {text}"
+
+
 # === Fix round 19: local negation per action and broad-pattern local negation ===
 
 @pytest.mark.parametrize("text,expected", [
