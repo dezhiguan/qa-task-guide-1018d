@@ -4,7 +4,7 @@ from typing import Any
 
 
 def _extract_job_ids(text: str) -> list:
-    return re.findall(r"DF-\d+", text)
+    return [m.upper() for m in re.findall(r"DF-\d+", text, re.IGNORECASE)]
 
 
 def _blocked(reason: str) -> dict:
