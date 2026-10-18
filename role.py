@@ -15,7 +15,6 @@ def _pass_out(answer: str, ev: list, steps: list) -> dict:
     return {"decision": "PASS", "answer": answer, "evidence_sources": ev, "steps": steps}
 
 
-# (kept for potential reuse; no longer used by _is_locally_negated)
 _NEGATION_PREFIXES = re.compile(
     r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|不允许|not|never|without|don\'t)",
     re.IGNORECASE,
@@ -43,7 +42,6 @@ _WRITE_PATTERNS = [
     r"(?:把|将)\s*(?:任务|PR|pr|记录|job|ticket)\s*(?:关闭|批准|approve|close)",
 ]
 
-# Verb tokens used for local negation proximity check
 _VERB_TOKENS = r"(?:跳过核验|跳过检查|执行|修改|更改|设置|改|设为|改为|更新|取消|合并|发布|上线|部署|删除|创建|update|change|modify|set|merge|deploy|publish|release|cancel|delete|remove|create)"
 
 
@@ -65,9 +63,6 @@ def _split_into_action_segments(text: str) -> list:
     return result
 
 
-# Anchored local-negation pattern: must sit at the END of the preceding text.
-# Allows optional adverbs/modifiers between negation and verb, but forbids crossing
-# another action verb or a new request marker like 请.
 _LOCAL_NEG_RE = re.compile(
     r"(?:不必|不用|不要|不需要|不可|不|禁止|不得|无需|不代表|不能|勿|别|不允许|not|never|without|don\'t)"
     r"[\s]*"
@@ -75,7 +70,6 @@ _LOCAL_NEG_RE = re.compile(
     r"[\s]*$",
     re.IGNORECASE,
 )
-# Words that indicate a new clause/action between negation and verb → negation doesn't apply
 _LOCAL_NEG_BLOCKERS = re.compile(
     r"(?:请|然后|接着|之后|并且|而且|同时|but|and)",
     re.IGNORECASE,
@@ -84,16 +78,12 @@ _VERB_IN_BLOCKER_RE = re.compile(_VERB_TOKENS, re.IGNORECASE)
 
 
 def _is_locally_negated(seg: str, verb_start: int) -> bool:
-    """Check if a verb at verb_start is immediately preceded by a complete negation phrase
-    that does not cross another action verb or a new-request marker."""
     before = seg[:verb_start]
     if not before:
         return False
-    # Anchor: negation must be at the very end of 'before'
     m = _LOCAL_NEG_RE.search(before)
     if not m:
         return False
-    # Between the negation match start and verb_start, ensure no blocking words appear
     gap = before[m.start():]
     if _LOCAL_NEG_BLOCKERS.search(gap):
         return False
@@ -105,14 +95,12 @@ def _has_unnegated_write_request(text: str) -> bool:
     for seg in segments:
         for pat in _WRITE_PATTERNS:
             for m in re.finditer(pat, seg, re.IGNORECASE):
-                # Find the main verb within the match and check local negation
                 verb_in_match = re.search(_VERB_TOKENS, m.group(), re.IGNORECASE)
                 if verb_in_match:
                     verb_pos = m.start() + verb_in_match.start()
                     if _is_locally_negated(seg, verb_pos):
                         continue
                 else:
-                    # Fallback: check negation before the full match
                     if _is_locally_negated(seg, m.start()):
                         continue
                 return True
@@ -151,14 +139,12 @@ _INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不必|不用|
 def _is_injection(text: str) -> bool:
     if _has_unnegated_injection_base(text):
         return True
-    # Broad patterns: check LOCAL negation before the expression, not any-neg in segment
     if _has_unnegated_broad(text):
         return True
     return _has_unnegated_injection_english(text)
 
 
 _BROAD_PATTERNS = [r"(?:执行任何|可以.*所有|所有写操作|任何写操作)"]
-# Negation words that directly qualify a broad expression must be within 6 chars before it
 _BROAD_NEG_PREFIX = r"(?:不必|不用|不要|不需要|禁止|不得|不允许|不可|不能|无需|别|勿|不)(?:[，,、；;\s]*)?(?:执行)?(?:[，,、；;\s]*)?$"
 
 
@@ -166,10 +152,8 @@ def _has_unnegated_broad(text: str) -> bool:
     for pat in _BROAD_PATTERNS:
         for m in re.finditer(pat, text, re.IGNORECASE):
             before = text[max(0, m.start() - 8):m.start()]
-            # Must have a direct prohibition immediately before this broad expression
             if re.search(_BROAD_NEG_PREFIX, before, re.IGNORECASE):
                 continue
-            # "不影响结果就允许" — "不影响" is NOT direct negation of the broad expr
             return True
     return False
 
@@ -250,7 +234,9 @@ def _build_answer(job_records: list, readonly_tools: list) -> str:
 
 async def execute(data: dict, ctx) -> dict:
     text = data.get("text", "")
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str):
+        return _blocked("输入无效：text必须是字符串。")
+    if not text.strip():
         return _blocked("输入无效或为空白。")
 
     job_ids = _extract_job_ids(text)
@@ -299,11 +285,20 @@ async def execute(data: dict, ctx) -> dict:
     if not isinstance(catalog_result, list):
         return _blocked("工具目录返回格式无效。")
 
+    _VALID_ACCESS = {"READ", "WRITE", "EXEC"}
+    _VALID_RISK = {"LOW", "MID", "HIGH"}
     for item in catalog_result:
         if not isinstance(item, dict):
             return _blocked("目录条目无效。")
-        if not item.get("name") or not item.get("access") or not item.get("risk"):
-            return _blocked("目录条目缺少字段。")
+        _name = item.get("name")
+        _access = item.get("access")
+        _risk = item.get("risk")
+        if not isinstance(_name, str) or not _name.strip():
+            return _blocked("目录条目name无效。")
+        if not isinstance(_access, str) or _access.strip().upper() not in _VALID_ACCESS:
+            return _blocked("目录条目access无效。")
+        if not isinstance(_risk, str) or _risk.strip().upper() not in _VALID_RISK:
+            return _blocked("目录条目risk无效。")
 
     readonly_tools = _filter_readonly_tools(catalog_result)
 

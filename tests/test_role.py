@@ -591,9 +591,7 @@ async def test_prohibits_required_tools_articles(make_ctx, normal_catalog, text,
 
 
 @pytest.mark.parametrize("text,expected,tool_calls", [
-    # Negation of one action must NOT exempt a different affirmative action
     ("查询DF-0012，不改状态请发布到生产", "BLOCKED", 0),
-    # English 'do not cancel' must PASS — negation is immediately before cancel
     ("Read DF-0012; do not cancel the task.", "PASS", 2),
     ("read df-0012; do not cancel the task.", "PASS", 2),
 ])
@@ -628,15 +626,11 @@ async def test_fix_round21_boundary_cases(make_ctx, normal_catalog, text, expect
     assert ctx.tools.call.call_count == tool_calls, f"Expected {tool_calls} calls for: {text}"
 
 
-# === Fix round 19: local negation per action and broad-pattern local negation ===
-
 @pytest.mark.parametrize("text,expected", [
-    # BLOCKED: affirmative update/cancel not covered by negation in another clause
     ("查询DF-0012并更新任务状态为DONE", "BLOCKED"),
     ("Read DF-0012 and cancel the task", "BLOCKED"),
     ("查询DF-0012，不要修改状态请发布到生产", "BLOCKED"),
     ("查询DF-0012，若不影响结果就允许执行任何写操作", "BLOCKED"),
-    # PASS: normal negated queries still work
     ("查询DF-0012，不要更新任务状态", "PASS"),
     ("Read DF-0012; do not cancel the task.", "PASS"),
     ("查询DF-0012，禁止执行任何写操作", "PASS"),
@@ -652,3 +646,66 @@ async def test_fix_round19_local_negation(make_ctx, normal_catalog, text, expect
     assert result["decision"] == expected, f"Expected {expected} for: {text}, got {result['decision']}"
     if expected == "BLOCKED":
         assert ctx.tools.call.call_count == 0, f"Should BLOCK before tools: {text}"
+
+
+@pytest.mark.asyncio
+async def test_regression_non_string_text_no_typeerror():
+    """Fix: text=7 or text={} must not raise TypeError; returns BLOCKED."""
+    from role import execute
+    for bad in [1, 7, True, False, [], {}, None, 3.14]:
+        ctx = MagicMock()
+        ctx.tools.call = AsyncMock(side_effect=[[], []])
+        ctx.prompt = AsyncMock(return_value=MagicMock(compile=MagicMock(return_value="sys")))
+        ctx.llm.chat = AsyncMock(return_value='{"decision":"PASS"}')
+        result = await execute({"text": bad}, ctx)
+        assert result["decision"] == "BLOCKED", f"text={bad!r} must BLOCK not crash"
+
+
+@pytest.mark.asyncio
+async def test_regression_catalog_integer_name_blocked(make_ctx):
+    """Fix: catalog entry with name=7 (int) must be BLOCKED, not treated as valid."""
+    from role import execute
+    bad_catalog = [{"name": 7, "access": "READ", "risk": "LOW"}]
+    ctx = make_ctx([{"id": "DF-0012", "status": "RUN", "title": "t"}], bad_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_regression_catalog_invalid_access_enum_blocked(make_ctx):
+    """Fix: access='DELETE' is not READ/WRITE/EXEC -> BLOCKED."""
+    from role import execute
+    bad_catalog = [{"name": "tool", "access": "DELETE", "risk": "LOW"}]
+    ctx = make_ctx([{"id": "DF-0012", "status": "RUN", "title": "t"}], bad_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_regression_catalog_invalid_risk_enum_blocked(make_ctx):
+    """Fix: risk='EXTREME' is not LOW/MID/HIGH -> BLOCKED."""
+    from role import execute
+    bad_catalog = [{"name": "tool", "access": "READ", "risk": "EXTREME"}]
+    ctx = make_ctx([{"id": "DF-0012", "status": "RUN", "title": "t"}], bad_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_regression_catalog_empty_name_blocked(make_ctx):
+    """Fix: name='' is not a valid non-empty string -> BLOCKED."""
+    from role import execute
+    bad_catalog = [{"name": "", "access": "READ", "risk": "LOW"}]
+    ctx = make_ctx([{"id": "DF-0012", "status": "RUN", "title": "t"}], bad_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_regression_catalog_normal_entry_still_pass(make_ctx):
+    """Fix: valid name=str, access=READ, risk=LOW entry must still PASS."""
+    from role import execute
+    good_catalog = [{"name": "code.search", "access": "READ", "risk": "LOW", "description": "搜索"}]
+    ctx = make_ctx([{"id": "DF-0012", "status": "RUN", "title": "t"}], good_catalog)
+    result = await execute({"text": "查询任务DF-0012。"}, ctx)
+    assert result["decision"] == "PASS"
