@@ -29,7 +29,7 @@ _WRITE_PATTERNS = [
     r"(?:然后|接着|之后)\s*(?:执行|修改|合并|发布)",
     r"(?:把|将|对)\s*(?:状态|status)\s*(?:修改|更改|改|设为|设置为|改为)",
     r"(?:修改|更改|设置|改)\s*(?:状态|status)\s*(?:为|成|到)",
-    r"(?:update|change|modify|set)\s+(?:the\s+)?(?:status|state)",
+    r"(?:update|change|modify|set)\s+(?:(?:the|its|this|that|your|job|task|ticket|record|item)\s+)?(?:status|state)",
     r"(?:deploy|merge|publish|release)\s+(?:to|into|the|it|this|task|job)",
     r"(?:把|将).{0,20}(?:合并|发布|上线|部署)",
 ]
