@@ -578,3 +578,20 @@ async def test_english_injection_negation_anchor(make_ctx, normal_catalog, text,
     assert result["decision"] == expected, f"Expected {expected} for: {text}, got {result['decision']}"
     if expected == "BLOCKED":
         assert ctx.tools.call.call_count == 0, f"Should BLOCK before tools: {text}"
+
+
+@pytest.mark.parametrize("text,expected,tool_calls", [
+    ("Do not call the devflow.job.read tool when checking DF-0012", "BLOCKED", 0),
+    ("Read DF-0012 without using the devflow.catalog.search tool", "BLOCKED", 0),
+    ("Read DF-0012; do not use either devflow.job.read or devflow.catalog.search", "BLOCKED", 0),
+    ("Read DF-0012; do not call the devflow.job.update tool", "PASS", 2),
+])
+@pytest.mark.asyncio
+async def test_prohibits_required_tools_articles(make_ctx, normal_catalog, text, expected, tool_calls):
+    from role import execute
+    ids = re.findall(r"DF-\d+", text)
+    job = [{"id": ids[0] if ids else "DF-0012", "status": "RUN", "title": "冠词回归"}]
+    ctx = make_ctx(job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == expected, f"Expected {expected} for: {text}, got {result['decision']}"
+    assert ctx.tools.call.call_count == tool_calls, f"Expected {tool_calls} tool calls for: {text}"

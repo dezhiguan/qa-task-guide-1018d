@@ -88,10 +88,11 @@ def _has_unnegated_write_request(text: str) -> bool:
 def _prohibits_required_tools(text: str) -> bool:
     _REQUIRED_TOOLS = r"(?:devflow\.job\.read|devflow\.catalog\.search)"
     _GENERIC_READ = r"(?:工具|这些工具|上述工具|读取工具|全部工具|所有工具|the\s+tools?|all\s+tools?|these\s+tools?|reading\s+tools?)"
+    _EN_DET = r"(?:(?:the|either|any|both|all|neither|these|those|such|one|each|every)\s+(?:of\s+(?:the\s+)?)?)?"
     patterns = [
         rf"(?:不要|禁止|不得|无需|不能|不许|别|勿|不可)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
         rf"(?:跳过|不调用|不使用|不执行|不访问)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ}|工具|读取|所有|全部)",
-        rf"(?:do\s*not|don\'t|without|never)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"(?:do\s*not|don\'t|without|never)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+{_EN_DET}(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
         rf"skip\s+(?:{_REQUIRED_TOOLS}|all\s+(?:read|tools)|the\s+(?:read|tool))",
     ]
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
