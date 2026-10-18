@@ -7,7 +7,9 @@ agent = Agent.from_manifest("agent.yaml")
 
 @agent.entry
 async def run(request, ctx):
-    raw = request.input.get("text") or ""
+    raw = request.input.get("text")
+    if not isinstance(raw, str):
+        raise KeelError(ErrorCode.SERVER_INVALID_PARAM, "输入 text 必须是字符串")
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
