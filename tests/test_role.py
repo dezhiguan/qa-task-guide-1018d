@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -31,6 +32,10 @@ def normal_catalog():
         {"name": "task.read", "access": "READ", "risk": "LOW", "description": "读取任务"},
         {"name": "deploy", "access": "EXEC", "risk": "HIGH", "description": "部署"},
     ]
+
+
+def _job_for(requested_id, status="RUN", title="测试任务"):
+    return [{"id": requested_id, "status": status, "title": title}]
 
 
 @pytest.mark.asyncio
@@ -86,9 +91,9 @@ async def test_write_request_blocked(make_ctx, normal_job, normal_catalog):
 
 
 @pytest.mark.asyncio
-async def test_negated_write_not_blocked(make_ctx, normal_job, normal_catalog):
+async def test_negated_write_not_blocked(make_ctx, normal_catalog):
     from role import execute
-    ctx = make_ctx(normal_job, normal_catalog)
+    ctx = make_ctx(_job_for("DF-0011"), normal_catalog)
     result = await execute({"text": "查询任务DF-0011，仅解释现状和工具，不执行发布。"}, ctx)
     assert result["decision"] == "PASS"
 
@@ -123,9 +128,9 @@ async def test_tool_exception_blocked(make_ctx):
 
 
 @pytest.mark.asyncio
-async def test_chinese_adjacent_id_pass(make_ctx, normal_job, normal_catalog):
+async def test_chinese_adjacent_id_pass(make_ctx, normal_catalog):
     from role import execute
-    ctx = make_ctx(normal_job, normal_catalog)
+    ctx = make_ctx(_job_for("DF-0010"), normal_catalog)
     result = await execute({"text": "任务DF-0010现在怎样？给我当前记录与目录建议。"}, ctx)
     assert result["decision"] == "PASS"
 
@@ -179,9 +184,9 @@ async def test_mixed_negation_write_blocked(make_ctx, normal_job, normal_catalog
 
 
 @pytest.mark.asyncio
-async def test_negated_only_pass(make_ctx, normal_job, normal_catalog):
+async def test_negated_only_pass(make_ctx, normal_catalog):
     from role import execute
-    ctx = make_ctx(normal_job, normal_catalog)
+    ctx = make_ctx(_job_for("DF-0011"), normal_catalog)
     result = await execute({"text": "查询任务DF-0011，仅解释现状和工具，不执行发布，禁止实际更改任何任务。"}, ctx)
     assert result["decision"] == "PASS"
 
@@ -209,7 +214,6 @@ async def test_tool_prohibition_vs_normal(make_ctx, normal_job, normal_catalog, 
 
 @pytest.mark.asyncio
 async def test_affirmative_write_chinese_blocked(make_ctx, normal_job, normal_catalog):
-    """Issue 1: '把状态修改为DONE' must BLOCK even with model PASS."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": "查询DF-0012，把状态修改为DONE。"}, ctx)
@@ -218,7 +222,6 @@ async def test_affirmative_write_chinese_blocked(make_ctx, normal_job, normal_ca
 
 @pytest.mark.asyncio
 async def test_affirmative_write_english_blocked(make_ctx, normal_job, normal_catalog):
-    """Issue 1: English 'update its status to DONE' must BLOCK."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": "Read DF-0012 and update its status to DONE."}, ctx)
@@ -227,7 +230,6 @@ async def test_affirmative_write_english_blocked(make_ctx, normal_job, normal_ca
 
 @pytest.mark.asyncio
 async def test_no_punctuation_negation_cross_blocked(make_ctx, normal_job, normal_catalog):
-    """Issue 2: '仅查询...然后执行' without comma still BLOCKED."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": "仅查询DF-0012然后执行devflow.job.update将状态改为DONE"}, ctx)
@@ -236,7 +238,6 @@ async def test_no_punctuation_negation_cross_blocked(make_ctx, normal_job, norma
 
 @pytest.mark.asyncio
 async def test_invalid_status_none_blocked(make_ctx, normal_catalog):
-    """Issue 3: status=None must BLOCK before model call."""
     from role import execute
     ctx = make_ctx([{"id": "DF-0012", "status": None}], normal_catalog)
     result = await execute({"text": "查询任务DF-0012。"}, ctx)
@@ -245,7 +246,6 @@ async def test_invalid_status_none_blocked(make_ctx, normal_catalog):
 
 @pytest.mark.asyncio
 async def test_invalid_status_empty_blocked(make_ctx, normal_catalog):
-    """Issue 3: status='' must BLOCK."""
     from role import execute
     ctx = make_ctx([{"id": "DF-0012", "status": ""}], normal_catalog)
     result = await execute({"text": "查询任务DF-0012。"}, ctx)
@@ -254,7 +254,6 @@ async def test_invalid_status_empty_blocked(make_ctx, normal_catalog):
 
 @pytest.mark.asyncio
 async def test_invalid_status_bogus_blocked(make_ctx, normal_catalog):
-    """Issue 3: status='BOGUS' not in allowed set must BLOCK."""
     from role import execute
     ctx = make_ctx([{"id": "DF-0012", "status": "BOGUS"}], normal_catalog)
     result = await execute({"text": "查询任务DF-0012。"}, ctx)
@@ -263,7 +262,6 @@ async def test_invalid_status_bogus_blocked(make_ctx, normal_catalog):
 
 @pytest.mark.asyncio
 async def test_invalid_status_boolean_blocked(make_ctx, normal_catalog):
-    """Issue 3: status=True (bool) must BLOCK."""
     from role import execute
     ctx = make_ctx([{"id": "DF-0012", "status": True}], normal_catalog)
     result = await execute({"text": "查询任务DF-0012。"}, ctx)
@@ -272,7 +270,6 @@ async def test_invalid_status_boolean_blocked(make_ctx, normal_catalog):
 
 @pytest.mark.asyncio
 async def test_non_string_input_blocked():
-    """Issue 4: non-string text must return BLOCKED, not raise."""
     from role import execute
     ctx = MagicMock()
     ctx.tools.call = AsyncMock(side_effect=[[{"id":"DF-0012","status":"RUN"}], [{"name":"x","access":"READ","risk":"LOW","description":""}]])
@@ -286,7 +283,6 @@ async def test_non_string_input_blocked():
 @pytest.mark.parametrize("status", ["RUN", "WAIT", "HUMAN", "QUEUED", "DONE", "FAIL", "CANCEL"])
 @pytest.mark.asyncio
 async def test_all_valid_statuses_pass(make_ctx, normal_catalog, status):
-    """Issue 3: all 7 valid statuses produce PASS (known records)."""
     from role import execute
     ctx = make_ctx([{"id": "DF-0012", "status": status}], normal_catalog)
     result = await execute({"text": "查询任务DF-0012的真实进度，只提供信息。"}, ctx)
@@ -295,7 +291,6 @@ async def test_all_valid_statuses_pass(make_ctx, normal_catalog, status):
 
 @pytest.mark.asyncio
 async def test_english_deploy_blocked(make_ctx, normal_job, normal_catalog):
-    """Issue 1: English 'deploy to production' must BLOCK."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": "Read DF-0012 status and deploy to production."}, ctx)
@@ -304,14 +299,11 @@ async def test_english_deploy_blocked(make_ctx, normal_job, normal_catalog):
 
 @pytest.mark.asyncio
 async def test_english_merge_blocked(make_ctx, normal_job, normal_catalog):
-    """Issue 1: English 'merge the PR' must BLOCK."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": "Check DF-0012 and merge the PR now."}, ctx)
     assert result["decision"] == "BLOCKED"
 
-
-# ===== Fix 9: semantic precision for negation / injection / tool prohibition =====
 
 @pytest.mark.parametrize("text", [
     "Read DF-0012; do not change its status.",
@@ -328,10 +320,13 @@ async def test_english_merge_blocked(make_ctx, normal_job, normal_catalog):
     "只查询DF-0010的进度说明。",
 ])
 @pytest.mark.asyncio
-async def test_negated_safety_statements_pass(make_ctx, normal_job, normal_catalog, text):
-    """Fix 9: safety/negation statements must not be treated as write/injection/prohibition."""
+async def test_negated_safety_statements_pass(make_ctx, normal_catalog, text):
     from role import execute
-    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    ids = re.findall(r"DF-\d+", text)
+    if not ids:
+        ids = ["DF-0012"]
+    job = [{"id": ids[0], "status": "RUN", "title": "测试"}]
+    ctx = make_ctx(job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": text}, ctx)
     assert result["decision"] == "PASS", f"Should PASS: {text}"
 
@@ -349,7 +344,6 @@ async def test_negated_safety_statements_pass(make_ctx, normal_job, normal_catal
 ])
 @pytest.mark.asyncio
 async def test_affirmative_write_after_negation_blocked(make_ctx, normal_job, normal_catalog, text):
-    """Fix 9: affirmative write in a separate segment (but/and/但) must BLOCK."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": text}, ctx)
@@ -363,8 +357,98 @@ async def test_affirmative_write_after_negation_blocked(make_ctx, normal_job, no
 ])
 @pytest.mark.asyncio
 async def test_scope_prefix_does_not_exempt_write(make_ctx, normal_job, normal_catalog, text):
-    """Scope declarations (仅/只查询) must not exempt affirmative write in same or adjacent segment."""
     from role import execute
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": text}, ctx)
     assert result["decision"] == "BLOCKED", f"Should BLOCK: {text}"
+
+
+@pytest.mark.parametrize("text", [
+    "查询DF-0012，禁止执行任何写操作。",
+    "查询DF-0012，不得执行任何写操作。",
+    "任务DF-0011，不要执行任何写操作。",
+])
+@pytest.mark.asyncio
+async def test_negated_any_write_pass(make_ctx, normal_catalog, text):
+    from role import execute
+    ids = re.findall(r"DF-\d+", text)
+    job = [{"id": ids[0], "status": "WAIT", "title": "安全声明测试"}]
+    ctx = make_ctx(job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == "PASS", f"Negated write should PASS: {text}"
+
+
+@pytest.mark.parametrize("text", [
+    "查询DF-0012，允许执行任何写操作。",
+    "查询DF-0012，授权执行所有写操作。",
+])
+@pytest.mark.asyncio
+async def test_affirmative_any_write_blocked(make_ctx, normal_job, normal_catalog, text):
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == "BLOCKED", f"Affirmative write auth should BLOCK: {text}"
+
+
+@pytest.mark.asyncio
+async def test_jobid_field_matches_pass(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"jobId": "DF-0012", "status": "RUN", "title": "匹配"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "PASS"
+
+
+@pytest.mark.asyncio
+async def test_id_field_matches_pass(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"id": "DF-0012", "status": "RUN", "title": "兼容"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "PASS"
+
+
+@pytest.mark.asyncio
+async def test_jobid_mismatch_blocked(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"jobId": "DF-999999", "status": "RUN", "title": "不匹配"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_id_mismatch_blocked(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"id": "DF-999999", "status": "RUN", "title": "不匹配"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_missing_identifier_blocked(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"status": "RUN", "title": "无标识"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_conflicting_identifiers_blocked(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"jobId": "DF-0012", "id": "DF-0099", "status": "RUN"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_non_string_identifier_blocked(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"id": 12345, "status": "RUN"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_both_fields_match_pass(make_ctx, normal_catalog):
+    from role import execute
+    ctx = make_ctx([{"jobId": "DF-0012", "id": "DF-0012", "status": "RUN"}], normal_catalog)
+    result = await execute({"text": "查询任务DF-0012的状态。"}, ctx)
+    assert result["decision"] == "PASS"

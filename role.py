@@ -37,8 +37,6 @@ _WRITE_PATTERNS = [
 
 
 def _has_unnegated_write_request(text: str) -> bool:
-    """Segment-level check: negation only covers its own segment, not cross-segment.
-    But/then/而开启的后续段独立判定，不被前段否定豁免。"""
     segments = re.split(
         r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时|但|但是|不过|however|but|then)",
         text, flags=re.IGNORECASE,
@@ -55,8 +53,6 @@ def _has_unnegated_write_request(text: str) -> bool:
 
 
 def _prohibits_required_tools(text: str) -> bool:
-    """Detect explicit prohibition of calling required READ tools only.
-    Prohibiting write tools (e.g. devflow.job.update) is a normal safety statement."""
     _REQUIRED_TOOLS = r"(?:devflow\.job\.read|devflow\.catalog\.search)"
     _GENERIC_READ = r"(?:工具|这些工具|上述工具|读取工具|全部工具|所有工具|the\s+tools?|all\s+tools?|these\s+tools?|reading\s+tools?)"
     patterns = [
@@ -68,19 +64,56 @@ def _prohibits_required_tools(text: str) -> bool:
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
+_INJECTION_BASE_PATTERNS = [
+    r"(?:新的系统指令|作为.*指令|以下.*规则)",
+    r"(?<![不禁要别勿])ignore\s+(?:all|the|any)\s+rule",
+    r"(?<![不禁要别勿得能可许])(?:忽略|覆盖)(?:所有|全部|一切)?.*规则",
+    r"(?<![不禁要别勿得能可许])(?:fabricat|编造|虚构|伪造)(?:\s+(?:a|an|the|their|this|that)?\s*(?:successful\s+)?(?:task\s+)?(?:record|status|result|数据|记录|结果))",
+    r"(?:必须.*(?:输出|返回).*(?:PASS|通过))",
+    r"(?:跳过.*(?:工具|检查|核验|验证)|skip.*(?:tool|check|read))",
+]
+
+_INJECTION_BROAD_PATTERNS = [r"(?:执行任何|可以.*所有|所有写操作|任何写操作)"]
+
+_NEG_SEGMENT = r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|never|without|don\'t|no\s+)"
+
+
 def _is_injection(text: str) -> bool:
-    """Detect prompt injection / authority-override attempts.
-    Negated forms like '不要编造' or '不得忽略规则' are safety constraints, not injections."""
-    patterns = [
-        r"(?:新的系统指令|作为.*指令|以下.*规则)",
-        r"(?<![不禁要别勿])ignore\s+(?:all|the|any)\s+rule",
-        r"(?<![不禁要别勿得能可许])(?:忽略|覆盖)(?:所有|全部|一切)?.*规则",
-        r"(?<![不禁要别勿得能可许])(?:fabricat|编造|虚构|伪造)(?:\s+(?:a|an|the|their|this|that)?\s*(?:successful\s+)?(?:task\s+)?(?:record|status|result|数据|记录|结果))",
-        r"(?:执行任何|可以.*所有|所有写操作|任何写操作)",
-        r"(?:必须.*(?:输出|返回).*(?:PASS|通过))",
-        r"(?:跳过.*(?:工具|检查|核验|验证)|skip.*(?:tool|check|read))",
-    ]
-    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+    if any(re.search(p, text, re.IGNORECASE) for p in _INJECTION_BASE_PATTERNS):
+        return True
+    segments = re.split(
+        r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时|但|但是|不过|however|but|then)",
+        text, flags=re.IGNORECASE,
+    )
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        has_broad = any(re.search(p, seg, re.IGNORECASE) for p in _INJECTION_BROAD_PATTERNS)
+        has_neg = re.search(_NEG_SEGMENT, seg, re.IGNORECASE)
+        if has_broad and not has_neg:
+            return True
+    return False
+
+
+def _validate_job_identifier(rec: dict, job_id: str) -> str:
+    ids_found = []
+    if "jobId" in rec:
+        jid = rec["jobId"]
+        if not isinstance(jid, str) or not jid.strip():
+            return "记录中jobId字段无效。"
+        ids_found.append(jid.strip())
+    if "id" in rec:
+        iid = rec["id"]
+        if not isinstance(iid, str) or not iid.strip():
+            return "记录中id字段无效。"
+        ids_found.append(iid.strip())
+    if not ids_found:
+        return "记录缺少jobId或id标识字段。"
+    for found_id in ids_found:
+        if found_id != job_id:
+            return f"记录标识'{found_id}'与请求的'{job_id}'不匹配。"
+    return ""
 
 
 def _filter_readonly_tools(catalog: list) -> list:
@@ -97,65 +130,65 @@ def _filter_readonly_tools(catalog: list) -> list:
 
 def _build_answer(job_records: list, readonly_tools: list) -> str:
     lines = []
-    lines.append("【任务状态】")
+    lines.append("[任务状态]")
     for rec in job_records:
         if isinstance(rec, dict):
-            jid = rec.get("id", rec.get("jobId", "未知"))
-            status = rec.get("status", "未知")
+            jid = rec.get("jobId", rec.get("id", "?"))
+            status = rec.get("status", "?")
             title = rec.get("title", rec.get("name", ""))
-            lines.append(f"  - {jid}: 状态={status}, 标题={title}")
-    lines.append("\n【可用只读工具】(access=READ, risk=LOW)")
+            lines.append(f"  - {jid}: {status} {title}")
+    lines.append("[可用只读工具]")
     if readonly_tools:
         for t in readonly_tools:
             lines.append(f"  - {t.get('name','?')}: {t.get('description','')}")
     else:
-        lines.append("  (无符合条件的只读低风险工具)")
+        lines.append("  (无)")
     return "\n".join(lines)
 
 
 async def execute(data: dict, ctx) -> dict:
     text = data.get("text", "")
     if not isinstance(text, str) or not text.strip():
-        return _blocked("输入无效或为空白，无法提取任务编号。")
+        return _blocked("输入无效或为空白。")
 
     job_ids = _extract_job_ids(text)
     unique_ids = list(dict.fromkeys(job_ids))
 
     if len(unique_ids) == 0:
-        return _blocked("未检测到明确的DF-数字任务编号。")
+        return _blocked("未检测到DF-数字任务编号。")
     if len(unique_ids) > 1:
-        return _blocked(f"检测到多个不同任务编号({', '.join(unique_ids)})，仅支持单任务查询。")
+        return _blocked(f"多个任务编号({', '.join(unique_ids)})，仅支持单任务。")
 
     job_id = unique_ids[0]
 
     if _has_unnegated_write_request(text):
-        return _blocked("检测到肯定性写操作/发布/合并请求，本岗位仅提供信息查询。")
+        return _blocked("检测到肯定性写操作请求。")
     if _is_injection(text):
-        return _blocked("检测到提示注入或权限覆盖尝试，本岗位不接受外部指令覆盖。")
+        return _blocked("检测到提示注入或权限覆盖尝试。")
     if _prohibits_required_tools(text):
-        return _blocked("检测到明确禁止调用必需读取工具的指令，无法完成查询。")
+        return _blocked("检测到禁止调用必需读取工具。")
 
-    # 调用 devflow.job.read
     try:
         job_result = await ctx.tools.call("devflow.job.read", jobId=job_id)
     except Exception:
         return _blocked("调用devflow.job.read失败。")
 
     if not isinstance(job_result, list) or len(job_result) == 0:
-        return _blocked(f"任务{job_id}无记录或查询返回空列表。")
+        return _blocked(f"任务{job_id}无记录。")
 
-    # 校验每条记录是dict且status为非空合法字符串
     _VALID_STATUSES = {"RUN", "WAIT", "HUMAN", "QUEUED", "DONE", "FAIL", "CANCEL"}
     for rec in job_result:
         if not isinstance(rec, dict) or "status" not in rec:
-            return _blocked(f"任务{job_id}返回的记录格式无效。")
+            return _blocked("记录格式无效。")
         status = rec["status"]
         if not isinstance(status, str) or not status.strip():
-            return _blocked(f"任务{job_id}的status字段无效（非字符串或为空）。")
+            return _blocked("status字段无效。")
         if status.strip().upper() not in _VALID_STATUSES:
-            return _blocked(f"任务{job_id}的status值'{status}'不在合法集合中。")
+            return _blocked(f"status'{status}'不合法。")
+        err = _validate_job_identifier(rec, job_id)
+        if err:
+            return _blocked(err)
 
-    # 调用 devflow.catalog.search
     try:
         catalog_result = await ctx.tools.call("devflow.catalog.search", query="")
     except Exception:
@@ -166,27 +199,25 @@ async def execute(data: dict, ctx) -> dict:
 
     for item in catalog_result:
         if not isinstance(item, dict):
-            return _blocked("工具目录包含无效条目（非字典类型）。")
+            return _blocked("目录条目无效。")
         if not item.get("name") or not item.get("access") or not item.get("risk"):
-            return _blocked("工具目录条目缺少name/access/risk字段。")
+            return _blocked("目录条目缺少字段。")
 
     readonly_tools = _filter_readonly_tools(catalog_result)
 
-    # 组装证据
     evidence = {
         "job_records": job_result,
         "catalog_raw": catalog_result,
         "readonly_tools": readonly_tools,
     }
     steps = [
-        f"提取任务编号: {job_id}",
-        f"调用devflow.job.read(jobId={job_id})获取{len(job_result)}条记录",
-        "调用devflow.catalog.search(query='')获取目录",
-        f"过滤只读低风险工具{len(readonly_tools)}个",
+        f"提取: {job_id}",
+        f"devflow.job.read({job_id}) -> {len(job_result)}条",
+        "devflow.catalog.search('') -> 目录",
+        f"过滤READ+LOW: {len(readonly_tools)}个",
     ]
     evidence_sources = ["devflow.job.read", "devflow.catalog.search"]
 
-    # 模型推理
     prompt_obj = await ctx.prompt("role")
     system_msg = prompt_obj.compile()
     user_msg = json.dumps({"input": text, "evidence": evidence}, ensure_ascii=False)
@@ -196,24 +227,22 @@ async def execute(data: dict, ctx) -> dict:
         prompt=prompt_obj,
     )
 
-    # 严格解析模型输出
     try:
         parsed = json.loads(model_output)
     except (json.JSONDecodeError, TypeError):
         return _blocked("模型输出无法解析为JSON。")
 
     if not isinstance(parsed, dict):
-        return _blocked("模型输出非JSON对象。")
+        return _blocked("模型输出非对象。")
 
     decision = parsed.get("decision")
     if decision is None:
-        return _blocked("模型输出缺少decision字段。")
+        return _blocked("缺少decision字段。")
     if not isinstance(decision, str) or decision.upper() not in ("PASS", "BLOCKED"):
-        return _blocked("模型decision字段无效。")
+        return _blocked("decision字段无效。")
 
     if decision.upper() == "BLOCKED":
-        return _blocked("模型判断BLOCKED: " + str(parsed.get("answer", parsed.get("block_reason", ""))))
+        return _blocked("模型BLOCKED: " + str(parsed.get("answer", parsed.get("block_reason", ""))))
 
-    # PASS: 由代码组装answer，不依赖模型answer
     answer = _build_answer(job_result, readonly_tools)
     return _pass_out(answer, evidence_sources, steps)
