@@ -15,41 +15,36 @@ def _pass_out(answer: str, ev: list, steps: list) -> dict:
     return {"decision": "PASS", "answer": answer, "evidence_sources": ev, "steps": steps}
 
 
-_NEGATION_PATTERNS = [
-    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别)[^，,。；;！!\n]{0,8}(?:执行|更改|合并|发布|修改|上线|改|设为|改为|设置为|部署|删除)",
-    r"(?:do\s*not|don't|doesn't|without|never|no)\s+(?:change|modify|update|set|merge|deploy|publish|release|delete|remove|create|ignore|disregard|override)\b",
-]
-
-# Noun suffixes that turn a verb into a compound noun (not an action command)
-_NOUN_SUFFIX_AFTER_VERB = r"(?:进度|时间|记录|日志|状态|计划|列表|说明|报告|详情|信息|文档)"
+_NEGATION_PREFIXES = re.compile(
+    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|不允许|not|never|without|don't)"
+)
 
 _WRITE_PATTERNS = [
     r"(?:跳过核验|跳过检查).{0,10}(?:直接|然后|再)?\s*(?:修改|执行|合并|发布|上线)",
-    r"(?:请|直接|自动)\s*(?:执行|修改|合并|发布|上线)",
-    r"执行\s*devflow\.(?:job\.update|pr\.merge|deploy)",
+    r"(?:请|直接|自动)\s*(?:执行|修改|合并|发布|上线|更新|取消)",
+    r"执行\s*devflow\.(?:job\.update|pr\.merge|deploy|job\.cancel)",
     r"(?:合并|发布|上线)\s*(?:关联的|到|至|将)",
-    r"(?:然后|接着|之后|并)\s*(?:执行|修改|合并|发布|上线)",
-    r"(?:把|将|对)\s*(?:状态|status)\s*(?:修改|更改|改|设为|设置为|改为)",
-    r"(?:修改|更改|设置|改)\s*(?:状态|status)\s*(?:为|成|到)",
-    r"(?:update|change|modify|set)\s+(?:(?:the|its|this|that|your|job|task|ticket|record|item)\s+)?(?:status|state)",
-    r"(?:update|change|modify|set|merge|deploy|publish|release)\s+(?:the|this|that|its|their)\s+(?:record|item|entry|task|job)",
-    r"(?:update|change|modify|set|merge|deploy|publish|release)\s+(?:to|into)\s+(?:production|prod|staging)",
-    r"(?:deploy|merge|publish|release)\s+(?:to|into|the|it|this|task|job)",
-    r"(?:把|将).{0,20}(?:合并|发布|上线|部署|删除|创建)",
-    # Require directional target or explicit object after verb; NOT when followed by noun suffix
-    r"(?:部署|删除|创建)(?:到|至|进)\s*(?:生产|线上|正式|测试环境)",
-    r"(?:部署|删除|创建)\s*(?:任务|这条|记录)(?!\s*(?:时间|进度))",
-    r"(?:delete|remove|create)\s+(?:the\s+)?(?:task|job|ticket|record|item|entry|PR|pr)\b",
-    r"^(?:合并|发布|上线|部署|删除|修改)(?!\s*(?:进度|时间|记录|日志|状态|计划|列表|说明|报告|详情|信息|文档))",
+    r"(?:然后|接着|之后|并)\s*(?:执行|修改|合并|发布|上线|更新|取消)",
+    r"(?:把|将|对)\s*(?:状态|status|task|job)\s*(?:修改|更改|改|设为|设置为|改为|更新|取消)",
+    r"(?:修改|更改|设置|改|更新|取消)\s*(?:状态|status|任务|task|job|record)\s*(?:为|成|到)?",
+    r"(?:update|change|modify|set|cancel)\s+(?:(?:the|its|this|that|your|job|task|ticket|record|item)\s+)?(?:status|state)",
+    r"(?:update|change|modify|set|merge|deploy|publish|release|cancel)\s+(?:the|this|that|its|their)\s+(?:record|item|entry|task|job)",
+    r"(?:update|change|modify|set|merge|deploy|publish|release|cancel)\s+(?:to|into)\s+(?:production|prod|staging)",
+    r"(?:deploy|merge|publish|release|cancel)\s+(?:to|into|the|it|this|task|job)\b",
+    r"(?:把|将).{0,20}(?:合并|发布|上线|部署|删除|创建|更新|取消)",
+    r"(?:部署|删除|创建|取消)(?:到|至|进)\s*(?:生产|线上|正式|测试环境)",
+    r"(?:部署|删除|创建|取消)\s*(?:任务|这条|记录)(?!\s*(?:时间|进度))",
+    r"(?:delete|remove|create|cancel)\s+(?:the\s+)?(?:task|job|ticket|record|item|entry|PR|pr)\b",
+    r"^(?:合并|发布|上线|部署|删除|修改|更新|取消)(?!\s*(?:进度|时间|记录|日志|状态|计划|列表|说明|报告|详情|信息|文档))",
 ]
 
+# Verb tokens used for local negation proximity check
+_VERB_TOKENS = r"(?:跳过核验|跳过检查|执行|修改|更改|设置|改|设为|改为|更新|取消|合并|发布|上线|部署|删除|创建|update|change|modify|set|merge|deploy|publish|release|cancel|delete|remove|create)"
 
 
 def _split_into_action_segments(text: str) -> list:
-    """Split text into segments, further splitting on '并' and 'and' to isolate actions."""
-    # First split by major delimiters
     primary_segments = re.split(
-        r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时|但|但是|不过|however|but|then)",
+        r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时|但|但是|不过|however|but)",
         text, flags=re.IGNORECASE,
     )
     result = []
@@ -57,8 +52,7 @@ def _split_into_action_segments(text: str) -> list:
         seg = seg.strip()
         if not seg:
             continue
-        # Further split on standalone '并' and 'and' (but not inside '合并')
-        sub = re.split(r"(?<!合)并(?!非)|\band\b(?!\s+\w+\s+\w+\s+and)", seg, flags=re.IGNORECASE)
+        sub = re.split(r"(?<!合)并(?!非)|(?<=\s)and(?=\s)", seg, flags=re.IGNORECASE)
         for s in sub:
             s = s.strip()
             if s:
@@ -66,22 +60,28 @@ def _split_into_action_segments(text: str) -> list:
     return result
 
 
+def _is_locally_negated(seg: str, verb_start: int) -> bool:
+    """Check if a verb at position verb_start is preceded by a negation within 6 chars."""
+    window = seg[max(0, verb_start - 6):verb_start]
+    return bool(_NEGATION_PREFIXES.search(window))
+
+
 def _has_unnegated_write_request(text: str) -> bool:
     segments = _split_into_action_segments(text)
     for seg in segments:
-        has_write = any(re.search(p, seg, re.IGNORECASE) for p in _WRITE_PATTERNS)
-        if not has_write:
-            continue
-        # Check negation patterns for this segment
-        is_neg = any(re.search(p, seg, re.IGNORECASE) for p in _NEGATION_PATTERNS)
-        # Also check broader negation: 不代表...合并/发布 pattern (negation scope covers multiple actions)
-        if is_neg:
-            continue
-        # Check if this segment starts with a scope-limiting negation like "不代表"
-        # which negates ALL actions in the same segment
-        if re.search(r"(?:不代表|不代表自动|不代表会|不代表要)", seg):
-            continue
-        return True
+        for pat in _WRITE_PATTERNS:
+            for m in re.finditer(pat, seg, re.IGNORECASE):
+                # Find the main verb within the match and check local negation
+                verb_in_match = re.search(_VERB_TOKENS, m.group(), re.IGNORECASE)
+                if verb_in_match:
+                    verb_pos = m.start() + verb_in_match.start()
+                    if _is_locally_negated(seg, verb_pos):
+                        continue
+                else:
+                    # Fallback: check negation before the full match
+                    if _is_locally_negated(seg, m.start()):
+                        continue
+                return True
     return False
 
 
@@ -90,7 +90,7 @@ def _prohibits_required_tools(text: str) -> bool:
     _GENERIC_READ = r"(?:工具|这些工具|上述工具|读取工具|全部工具|所有工具|the\s+tools?|all\s+tools?|these\s+tools?|reading\s+tools?)"
     _EN_DET = r"(?:(?:the|either|any|both|all|neither|these|those|such|one|each|every)\s+(?:of\s+(?:the\s+)?)?)?"
     patterns = [
-        rf"(?:不要|禁止|不得|无需|不能|不许|别|勿|不可)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"(?:不要|禁止|不得|无需|不能|不许|别|勿|不可|不允许)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
         rf"(?:跳过|不调用|不使用|不执行|不访问)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ}|工具|读取|所有|全部)",
         rf"(?:do\s*not|don\'t|without|never)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+{_EN_DET}(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
         rf"skip\s+(?:{_REQUIRED_TOOLS}|all\s+(?:read|tools)|the\s+(?:read|tool))",
@@ -109,36 +109,36 @@ _INJECTION_BASE_PATTERNS = [
     r"(?:force|must)\s*(?:output|return|print)\s*(?:PASS|pass)\b",
 ]
 
-_INJECTION_BROAD_PATTERNS = [r"(?:执行任何|可以.*所有|所有写操作|任何写操作)"]
-
-_NEG_SEGMENT = r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|never|without|don\'t|no\s+)"
-
-_INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不|禁止|不得|不要|无需|不能|不需要|不可|勿|别)\s*(?:[，,、；;]\s*)?$"
+_INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不|禁止|不得|不要|无需|不能|不需要|不可|勿|别|不允许)\s*(?:[，,、；;]\s*)?$"
 
 
 def _is_injection(text: str) -> bool:
-    # English "ignore/disregard/override previous/prior instructions" only counts if NOT negated
     if _has_unnegated_injection_base(text):
         return True
-    # Check broad patterns in segments
-    segments = re.split(
-        r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时|但|但是|不过|however|but|then)",
-        text, flags=re.IGNORECASE,
-    )
-    for seg in segments:
-        seg = seg.strip()
-        if not seg:
-            continue
-        has_broad = any(re.search(p, seg, re.IGNORECASE) for p in _INJECTION_BROAD_PATTERNS)
-        has_neg = re.search(_NEG_SEGMENT, seg, re.IGNORECASE)
-        if has_broad and not has_neg:
-            return True
-    # Check English ignore-previous in its own segment context
+    # Broad patterns: check LOCAL negation before the expression, not any-neg in segment
+    if _has_unnegated_broad(text):
+        return True
     return _has_unnegated_injection_english(text)
 
 
+_BROAD_PATTERNS = [r"(?:执行任何|可以.*所有|所有写操作|任何写操作)"]
+# Negation words that directly qualify a broad expression must be within 6 chars before it
+_BROAD_NEG_PREFIX = r"(?:禁止|不得|不要|不允许|不可|不能|无需|别|勿|不)(?:[，,、；;\s]*)?(?:执行)?(?:[，,、；;\s]*)?$"
+
+
+def _has_unnegated_broad(text: str) -> bool:
+    for pat in _BROAD_PATTERNS:
+        for m in re.finditer(pat, text, re.IGNORECASE):
+            before = text[max(0, m.start() - 8):m.start()]
+            # Must have a direct prohibition immediately before this broad expression
+            if re.search(_BROAD_NEG_PREFIX, before, re.IGNORECASE):
+                continue
+            # "不影响结果就允许" — "不影响" is NOT direct negation of the broad expr
+            return True
+    return False
+
+
 def _has_unnegated_injection_base(text: str) -> bool:
-    """Return True if ANY injection base pattern match is NOT negated."""
     segments = re.split(r"[，,、；;。！？\n]", text)
     for seg in segments:
         for pat in _INJECTION_BASE_PATTERNS:
@@ -151,9 +151,8 @@ def _has_unnegated_injection_base(text: str) -> bool:
 
 
 def _has_unnegated_injection_english(text: str) -> bool:
-    """Check for English 'ignore/disregard/override previous instructions' not preceded by negation."""
     pattern = r"(ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|above|earlier|the)?\s*(?:instructions?|rules?|prompts?|context|system)"
-    segments = re.split(r"[；;.\n]|[,，](?=\s*(?:do\s*not|don\'t|never|please|just|only))", text, flags=re.IGNORECASE)
+    segments = re.split(r"[；;\n]", text, flags=re.IGNORECASE)
     for seg in segments:
         for m in re.finditer(pattern, seg, re.IGNORECASE):
             before = seg[:m.start()]
