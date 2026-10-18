@@ -99,9 +99,9 @@ def _prohibits_required_tools(text: str) -> bool:
 
 _INJECTION_BASE_PATTERNS = [
     r"(?:新的系统指令|作为.*指令|以下.*规则)",
-    r"(?<![不禁要别勿])ignore\s+(?:all|the|any)\s+rule",
     r"(?:忽略|覆盖)(?:所有|全部|一切)?.*规则",
-    r"(?:fabricat|编造|虚构|伪造)(?:\s+(?:a|an|the|their|this|that)?\s*(?:successful\s+)?(?:task\s+)?(?:record|status|result|数据|记录|结果))",
+    r"(?:编造|伪造|虚构)(?:一?个|一份|虚假的?)?(?:成功的?)?(?:记录|结果|数据|状态)",
+    r"(?:fabricat(?:e|ing|ed)|make\s+up|invent)\s+(?:a|an|the|their|this|that|their)?\s*(?:successful\s+)?(?:task\s+)?(?:record|status|result)\b",
     r"(?:必须.*(?:输出|返回).*(?:PASS|通过))",
     r"(?:跳过.*(?:工具|检查|核验|验证)|skip.*(?:tool|check|read))",
     r"(?:强制|必须|立即|立刻|马上)\s*(?:输出|返回|显示|打印|给出)\s*(?:PASS|通过)",
@@ -112,13 +112,13 @@ _INJECTION_BROAD_PATTERNS = [r"(?:执行任何|可以.*所有|所有写操作|�
 
 _NEG_SEGMENT = r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别|never|without|don\'t|no\s+)"
 
+_INJECTION_NEG_PREFIX = r"(?:do\s*not|don\'t|never|without|cannot|不|禁止|不得|不要|无需|不能|不需要|不可|勿|别)\s*(?:[，,、；;]\s*)?$"
+
 
 def _is_injection(text: str) -> bool:
     # English "ignore/disregard/override previous/prior instructions" only counts if NOT negated
-    if any(re.search(p, text, re.IGNORECASE) for p in _INJECTION_BASE_PATTERNS):
-        # If base pattern matched, verify it's not in a negated context
-        if not _is_injection_negated(text):
-            return True
+    if _has_unnegated_injection_base(text):
+        return True
     # Check broad patterns in segments
     segments = re.split(
         r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时|但|但是|不过|however|but|then)",
@@ -136,29 +136,25 @@ def _is_injection(text: str) -> bool:
     return _has_unnegated_injection_english(text)
 
 
-def _is_injection_negated(text: str) -> bool:
-    """Check if injection base patterns matched but are in a negated context."""
+def _has_unnegated_injection_base(text: str) -> bool:
+    """Return True if ANY injection base pattern match is NOT negated."""
     segments = re.split(r"[，,、；;。！？\n]", text)
     for seg in segments:
-        if any(re.search(p, seg, re.IGNORECASE) for p in _INJECTION_BASE_PATTERNS):
-            # Check if this segment has negation covering the action word
-            for pat in _INJECTION_BASE_PATTERNS:
-                m = re.search(pat, seg, re.IGNORECASE)
-                if m:
-                    # Check what's immediately before the action keyword
-                    before = seg[:m.start()]
-                    if re.search(r"(?:do\s*not|don\'t|never|without|不|禁止|不得|不要|无需|不能|不需要|不可|勿|别)\s*$", before, re.IGNORECASE):
-                        return True
+        for pat in _INJECTION_BASE_PATTERNS:
+            for m in re.finditer(pat, seg, re.IGNORECASE):
+                before = seg[:m.start()]
+                if re.search(_INJECTION_NEG_PREFIX, before, re.IGNORECASE):
+                    continue
+                return True
     return False
 
 
 def _has_unnegated_injection_english(text: str) -> bool:
     """Check for English 'ignore/disregard/override previous instructions' not preceded by negation."""
     pattern = r"(ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|above|earlier|the)?\s*(?:instructions?|rules?|prompts?|context|system)"
-    segments = re.split(r"[；;。\n]|[,，](?=\s*(?:do\s*not|don\'t|never|please|just|only))", text, flags=re.IGNORECASE)
+    segments = re.split(r"[；;.\n]|[,，](?=\s*(?:do\s*not|don\'t|never|please|just|only))", text, flags=re.IGNORECASE)
     for seg in segments:
-        m = re.search(pattern, seg, re.IGNORECASE)
-        if m:
+        for m in re.finditer(pattern, seg, re.IGNORECASE):
             before = seg[:m.start()]
             if re.search(r"(?:do\s*not|don\'t|never|without|cannot)\s+", before, re.IGNORECASE):
                 continue
