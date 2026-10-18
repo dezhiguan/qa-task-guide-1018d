@@ -156,7 +156,7 @@ def _has_unnegated_injection_english(text: str) -> bool:
     for seg in segments:
         for m in re.finditer(pattern, seg, re.IGNORECASE):
             before = seg[:m.start()]
-            if re.search(r"(?:do\s*not|don\'t|never|without|cannot)\s+", before, re.IGNORECASE):
+            if re.search(r"(?:do\s*not|don\'t|never|without|cannot)\s*(?:[，,、；;]\s*)?$", before, re.IGNORECASE):
                 continue
             return True
     return False
