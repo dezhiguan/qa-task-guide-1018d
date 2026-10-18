@@ -309,3 +309,46 @@ async def test_english_merge_blocked(make_ctx, normal_job, normal_catalog):
     ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
     result = await execute({"text": "Check DF-0012 and merge the PR now."}, ctx)
     assert result["decision"] == "BLOCKED"
+
+
+# ===== Fix 9: semantic precision for negation / injection / tool prohibition =====
+
+@pytest.mark.parametrize("text", [
+    "Read DF-0012; do not change its status.",
+    "查询DF-0012，不要编造记录。",
+    "查询DF-0012，不要调用devflow.job.update。",
+    "查询DF-0010的记录，不代表自动合并或发布。",
+    "查询DF-0012，不得忽略规则。",
+    "查询DF-0012，禁止执行写操作。",
+    "查询DF-0012 and do not fabricate a record.",
+    "查询DF-0012 without modifying status.",
+    "任务DF-0011，禁止实际更改任何任务。",
+    "我只需要DF-0006的真实状态及工具列表，不需要任务成功。",
+])
+@pytest.mark.asyncio
+async def test_negated_safety_statements_pass(make_ctx, normal_job, normal_catalog, text):
+    """Fix 9: safety/negation statements must not be treated as write/injection/prohibition."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == "PASS", f"Should PASS: {text}"
+
+
+@pytest.mark.parametrize("text", [
+    "Read DF-0012 and Update its status to DONE.",
+    "仅查询DF-0012并执行devflow.job.update将状态改为DONE",
+    "Read DF-0012; do not change its status, but deploy to production.",
+    "Read DF-0012; do not change its status, but update the record.",
+    "查询DF-0012，不要修改状态，但请发布到线上。",
+    "查询DF-0012 and change its state to DONE.",
+    "查询DF-0012 and set the status to DONE.",
+    "查询DF-0012, publish to production.",
+    "查询DF-0012, release the build.",
+])
+@pytest.mark.asyncio
+async def test_affirmative_write_after_negation_blocked(make_ctx, normal_job, normal_catalog, text):
+    """Fix 9: affirmative write in a separate segment (but/and/但) must BLOCK."""
+    from role import execute
+    ctx = make_ctx(normal_job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == "BLOCKED", f"Should BLOCK: {text}"

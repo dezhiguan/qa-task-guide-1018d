@@ -16,9 +16,10 @@ def _pass_out(answer: str, ev: list, steps: list) -> dict:
 
 
 _NEGATION_PATTERNS = [
-    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要)\s*(?:执行|更改|合并|发布|修改|上线)",
-    r"(?:仅|只)\s*(?:查询|解释|说明|提供|读取|了解|需要)",
+    r"(?:不|禁止|不得|不要|无需|不代表|不能|不需要|不可|勿|别)[^，,。；;！!\n]{0,8}(?:执行|更改|合并|发布|修改|上线|改|设为|改为|设置为)",
+    r"(?:仅|只)\s*(?:查询|解释|说明|提供|读取|了解|需要|需要|只需)",
     r"(?:仅提供信息|Advice only|only read|read-only)",
+    r"(?:do\s*not|don't|doesn't|without|never|no)\s+(?:change|modify|update|set|merge|deploy|publish|release|do)\b",
 ]
 
 _WRITE_PATTERNS = [
@@ -36,42 +37,48 @@ _WRITE_PATTERNS = [
 
 
 def _has_unnegated_write_request(text: str) -> bool:
-    """Segment-level check: negation only covers its own segment, not cross-segment."""
+    """Segment-level check: negation only covers its own segment, not cross-segment.
+    But/then/而开启的后续段独立判定，不被前段否定豁免。"""
     segments = re.split(
-        r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时)",
+        r"[，,、；;。！？\n]|(?:然后|接着|之后|并且|而且|同时|但|但是|不过|however|but|then)",
         text, flags=re.IGNORECASE,
     )
     for seg in segments:
         seg = seg.strip()
         if not seg:
             continue
-        has_write = any(re.search(p, seg) for p in _WRITE_PATTERNS)
-        is_neg = any(re.search(p, seg) for p in _NEGATION_PATTERNS)
+        has_write = any(re.search(p, seg, re.IGNORECASE) for p in _WRITE_PATTERNS)
+        is_neg = any(re.search(p, seg, re.IGNORECASE) for p in _NEGATION_PATTERNS)
         if has_write and not is_neg:
             return True
     return False
 
 
 def _prohibits_required_tools(text: str) -> bool:
-    """Detect explicit prohibition of calling required read tools."""
+    """Detect explicit prohibition of calling required READ tools only.
+    Prohibiting write tools (e.g. devflow.job.update) is a normal safety statement."""
+    _REQUIRED_TOOLS = r"(?:devflow\.job\.read|devflow\.catalog\.search)"
+    _GENERIC_READ = r"(?:工具|这些工具|上述工具|读取工具|全部工具|所有工具|the\s+tools?|all\s+tools?|these\s+tools?|reading\s+tools?)"
     patterns = [
-        r"(?:不要|禁止|不得|无需|不能|不许|别|勿|不可)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:devflow\.\w+\.\w+|工具|这些工具|上述工具|读取工具|全部工具|所有工具)",
-        r"(?:跳过|不调用|不使用|不执行|不访问)\s*(?:devflow\.\w+\.\w+|工具|读取|所有|全部)",
-        r"(?:do\s*not|don't|without|never)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+(?:devflow\.\w+\.\w+|the\s+to(?:ol|ols)|all\s+tools?|reading\s+tools?|these\s+tools?)",
-    r"(?:without|do\s*not|don't|never)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+devflow\.\w+\.\w+",
-        r"skip\s+(?:devflow\.\w+\.\w+|all\s+(?:read|tools)|the\s+(?:read|tool)|reading)",
+        rf"(?:不要|禁止|不得|无需|不能|不许|别|勿|不可)\s*(?:调用|使用|执行|运行|访问|读取)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"(?:跳过|不调用|不使用|不执行|不访问)\s*(?:{_REQUIRED_TOOLS}|{_GENERIC_READ}|工具|读取|所有|全部)",
+        rf"(?:do\s*not|don't|without|never)\s+(?:calls?|calling|invokes?|invoking|uses?|using|executes?|executing|runs?|running|access(?:es|ing)?|reads?|reading)\s+(?:{_REQUIRED_TOOLS}|{_GENERIC_READ})",
+        rf"skip\s+(?:{_REQUIRED_TOOLS}|all\s+(?:read|tools)|the\s+(?:read|tool))",
     ]
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
 def _is_injection(text: str) -> bool:
-    """Detect prompt injection / authority-override attempts."""
+    """Detect prompt injection / authority-override attempts.
+    Negated forms like '不要编造' or '不得忽略规则' are safety constraints, not injections."""
     patterns = [
-        r"(?:新的系统指令|作为.*指令|以下.*规则|ignore.*rule|override|忽略.*规则)",
+        r"(?:新的系统指令|作为.*指令|以下.*规则)",
+        r"(?<![不禁要别勿])ignore\s+(?:all|the|any)\s+rule",
+        r"(?<![不禁要别勿])(?:忽略|覆盖)(?:所有|全部|一切)?.*规则",
+        r"(?<![不禁要别勿不])(?:fabricat|编造|虚构|伪造)(?:\s+(?:a|an|the|their|this|that)?\s*(?:successful\s+)?(?:task\s+)?(?:record|status|result|数据|记录|结果))",
         r"(?:执行任何|可以.*所有|所有写操作|任何写操作)",
         r"(?:必须.*(?:输出|返回).*(?:PASS|通过))",
         r"(?:跳过.*(?:工具|检查|核验|验证)|skip.*(?:tool|check|read))",
-        r"(?:fabricat|编造|虚构|伪造)",
     ]
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
