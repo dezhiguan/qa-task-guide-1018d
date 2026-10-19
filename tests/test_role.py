@@ -648,6 +648,26 @@ async def test_fix_round19_local_negation(make_ctx, normal_catalog, text, expect
         assert ctx.tools.call.call_count == 0, f"Should BLOCK before tools: {text}"
 
 
+@pytest.mark.parametrize("text,expected,tool_calls", [
+    ("查询 DF-0012 发布到生产的时间", "PASS", 2),
+    ("查询 DF-0012 是否已发布到生产", "PASS", 2),
+    ("查询DF-0012的发布进度", "PASS", 2),
+    ("请把DF-0012发布到生产", "BLOCKED", 0),
+    ("查询DF-0012，不改状态请发布到生产", "BLOCKED", 0),
+    ("查询DF-0012，发布到生产的时间是什么时候", "PASS", 2),
+])
+@pytest.mark.asyncio
+async def test_fix_round32_publish_progress_vs_command(make_ctx, normal_catalog, text, expected, tool_calls):
+    """发布到生产的时间/进度/是否已发布 are queries, not commands."""
+    from role import execute
+    ids = re.findall(r"(?<![a-zA-Z])DF-\d+(?![a-zA-Z0-9_]|\-\d)", text, re.IGNORECASE)
+    job = [{"id": (ids[0] if ids else "DF-0012").upper(), "status": "RUN", "title": "发布进度"}]
+    ctx = make_ctx(job, normal_catalog, model_response='{"decision":"PASS"}')
+    result = await execute({"text": text}, ctx)
+    assert result["decision"] == expected, f"Expected {expected} for: {text}, got {result['decision']}"
+    assert ctx.tools.call.call_count == tool_calls, f"Expected {tool_calls} calls for: {text}"
+
+
 @pytest.mark.asyncio
 async def test_regression_non_string_text_no_typeerror():
     """Fix: text=7 or text={} must not raise TypeError; returns BLOCKED."""
