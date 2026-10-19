@@ -44,6 +44,17 @@ _WRITE_PATTERNS = [
     r"(?:把|将)\s*(?:任务|PR|pr|记录|job|ticket)\s*(?:关闭|批准|approve|close)",
 ]
 
+_PROGRESS_QUERY_RE = re.compile(
+    r"(?:查询|查看|了解|看看|告诉我|说明|解释|read|check|status|progress|time|when|what)"
+    r".*(?:的\s*(?:时间|进度|状态|情况|计划|安排|详情|信息|日志|报告|结果|记录|方式|方案|步骤|流程)|什么时候|何时|多久|是否|有没有|了吗)",
+    re.IGNORECASE,
+)
+
+
+def _is_progress_query(text: str) -> bool:
+    return bool(_PROGRESS_QUERY_RE.search(text))
+
+
 _VERB_TOKENS = r"(?:跳过核验|跳过检查|执行|修改|更改|设置|改|设为|改为|更新|取消|合并|发布|上线|部署|删除|创建|update|change|modify|set|merge|deploy|publish|release|cancel|delete|remove|create)"
 
 
@@ -93,6 +104,8 @@ def _is_locally_negated(seg: str, verb_start: int) -> bool:
 
 
 def _has_unnegated_write_request(text: str) -> bool:
+    if _is_progress_query(text):
+        return False
     segments = _split_into_action_segments(text)
     for seg in segments:
         for pat in _WRITE_PATTERNS:
